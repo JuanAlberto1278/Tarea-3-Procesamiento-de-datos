@@ -1,0 +1,272 @@
+---
+title: "Tarea 3 Procesamiento de Datos"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+  
+---
+
+```{r setup, include=FALSE}
+library(DT)
+library(ggplot2)
+library(plotly)
+library(readxl)
+library(forcats)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(leaflet)
+library(sf)
+library(stringi)
+library(flexdashboard)
+
+datos_oij <- read_excel("estadisticaspoliciales2021.xls", 
+    col_types = c("text", "skip", "date", 
+        "skip", "text", "skip", "text", "text", 
+        "skip", "text", "text", "skip"))
+datos_oij <- mutate(datos_oij, Caso = c(1:38349))
+datos_oij <-
+  datos_oij %>%
+  select(Fecha, Delito, Victima, Edad, Genero, Provincia, Canton, Caso) %>%
+  mutate(Fecha = as.Date(Fecha, format = "%Y/%m/%d"))
+
+cantones <-
+  st_read(
+    dsn = "cantones.geojson",
+    quiet = TRUE
+  ) %>%
+  st_transform(4326)
+
+cantones <-
+  cantones %>%
+  st_transform(5367) %>%
+  st_simplify(dTolerance = 100) %>%
+  st_transform(4326)
+
+cantones <-
+  cantones %>%
+  mutate(canton_normalizado = tolower(stri_trans_general(canton, id = "Latin-ASCII")))
+
+delitos <-
+  datos_oij %>%
+  mutate(canton_normalizado = tolower(stri_trans_general(Canton, id = "Latin-ASCII")))
+
+delitos %>%
+  left_join(
+    dplyr::select(st_drop_geometry(cantones),
+                  canton_normalizado, cod_canton),
+    by = "canton_normalizado",
+    copy = FALSE,
+    keep = FALSE
+  ) %>%
+  filter(is.na(cod_canton) & canton_normalizado != "desconocido") %>%
+  distinct(canton_normalizado)
+
+delitos <-
+  delitos %>%
+  mutate(Canton = if_else(Canton == "LEON CORTES", "LEON CORTES CASTRO", Canton)) %>%
+  mutate(Canton = if_else(Canton == "VASQUEZ DE CORONADO", "VAZQUEZ DE CORONADO", Canton))
+
+delitos <-
+  delitos %>%
+  mutate(canton_normalizado = tolower(stri_trans_general(Canton, id = "Latin-ASCII")))
+
+delitos %>%
+  left_join(
+    dplyr::select(st_drop_geometry(cantones),
+                  canton_normalizado, cod_canton),
+    by = "canton_normalizado",
+    copy = FALSE,
+    keep = FALSE
+  ) %>%
+  filter(is.na(cod_canton) & canton_normalizado != "desconocido") %>%
+  distinct(canton_normalizado)
+
+delitos <-
+  delitos %>%
+  left_join(
+    dplyr::select(
+      st_drop_geometry(cantones),
+      cod_canton,
+      canton_normalizado
+    ),
+    by = "canton_normalizado",
+    copy = FALSE,
+    keep = FALSE
+  )
+
+delitos_x_canton <-
+  delitos %>%
+  count(cod_canton, name = "delitos")
+
+cantones_delitos <-
+  cantones %>%
+  left_join(
+    delitos_x_canton,
+    by = "cod_canton",
+    copy = FALSE,
+    keep = FALSE
+  )
+
+colores_cantones_delitos <-
+  colorNumeric(palette = "Reds",
+               domain = cantones_delitos$delitos,
+               na.color = "transparent")
+```
+
+Page 1
+=====================================  
+
+Row {data-height=10}
+-----------------------------------------------------------------------
+### **Fuente de los datos: [Página web del Organismo de Investigación Judicial (OIJ)](https://sitiooij.poder-judicial.go.cr/index.php/ayuda/servicios-policiales/servicios-a-organizaciones/indice-de-transparencia-del-sector-publico-costarricense/datos-abiertos)**
+
+Row {data-height=140}
+-----------------------------------------------------------------------
+
+### Tabla DT
+
+```{r Tabla-DT, echo=FALSE, warning=FALSE}
+datos_oij %>%
+  datatable(options = list(
+    pageLength = 15,
+    language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json'),
+    colnames(datos_oij) <- c("Delito","Fecha","Víctima","Edad","Género","Provincia")
+  ))
+```
+
+Page 2
+=====================================  
+
+Row
+-----------------------------------------------------------------------
+
+### Gráfico barras 1
+
+```{r Grafico-barras-1, echo=FALSE, warning=FALSE}
+ggplot2_delitos <-
+datos_oij %>%
+count(Delito) %>%
+ggplot(aes(x = reorder(Delito, n), y = n)) +
+geom_bar(stat = "identity") +
+ggtitle("Cantidad de delitos por delito") +
+xlab("Delito") +
+ylab("Cantidad") + 
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+ggplotly(ggplot2_delitos) %>% config(locale = 'es')
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Gráfico barras 2
+
+```{r grafico-barras-2, echo=FALSE, warning=FALSE}
+ggplot2_delitos <-
+datos_oij %>%
+count(Victima) %>%
+ggplot(aes(x = reorder(Victima, n), y = n)) +
+geom_bar(stat = "identity") +
+ggtitle("Cantidad de delitos por tipo de victima") +
+xlab("Tipo de Victima") +
+ylab("Cantidad") + 
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+ggplotly(ggplot2_delitos) %>% config(locale = 'es')
+```
+
+### Gráfico barras 3
+
+```{r grafico-barras-3, echo=FALSE, warning=FALSE}
+ggplot2_delitos_por_mes <-
+  datos_oij %>%
+  mutate(fecha = lubridate::month(Fecha))
+mes <-
+  c(
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre"
+  )
+  ggplot2_delitos_por_mes <- ggplot2_delitos_por_mes %>%
+  count(fecha) %>%
+  ggplot(aes(x = reorder(fecha, n), y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Cantidad de delitos por mes") +
+  xlab("Mes") +
+  ylab("Cantidad") +
+  theme()
+  
+ggplotly(ggplot2_delitos_por_mes) %>% config(locale = 'es')
+```
+
+
+### Gráfico barras 4
+
+```{r grafico-barras-4, echo=FALSE, warning=FALSE}
+ggplot2_delitos_por_genero <-
+  datos_oij %>%
+  ggplot(aes(x = Delito, fill = Genero)) +
+  geom_bar(position = "fill") +
+  ggtitle("Cantidad de delitos por género") +
+  xlab("Delito") +
+  ylab("Cantidad") +
+  labs(fill = "Género") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplotly(ggplot2_delitos_por_genero) %>% config(locale = 'es')
+```
+
+Page 3
+=====================================  
+
+### Mapa 1
+
+```{r mapa-1, echo=FALSE, warning=FALSE}
+leaflet() %>%
+  setView(
+    lng = -84.19452,
+    lat = 9.572735,
+    zoom = 7) %>%
+  addTiles(group = "OpenStreetMap") %>%
+  addPolygons(
+    data = cantones_delitos,
+    fillColor = ~ colores_cantones_delitos(cantones_delitos$delitos),
+    fillOpacity = 0.8,
+    color = "black",
+    stroke = TRUE,
+    weight = 1.0,
+    popup = paste(
+      paste(
+        "<strong>Cantón:</strong>",
+        cantones_delitos$canton
+      ),
+      paste(
+        "<strong>Delitos:</strong>",
+        cantones_delitos$delitos
+      ),
+      sep = '<br/>'
+    ),
+    group = "Delitos en cantones"
+  ) %>%
+  addLayersControl(
+    baseGroups = c("OpenStreetMap"),
+    overlayGroups = c("Delitos en cantones")
+  ) %>%
+  addLegend(
+    position = "bottomleft",
+    pal = colores_cantones_delitos,
+    values = cantones_delitos$delitos,
+    group = "Delitos",
+    title = "Cantidad de delitos"
+  )
+```
